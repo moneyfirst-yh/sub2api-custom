@@ -36,6 +36,65 @@ const Host = defineComponent({
 })
 
 describe('configured channel monitor latency colors', () => {
+  it('updates old warnings when the threshold is raised and lowered without changing failures or quota warnings', async () => {
+    const oldWarningMs = 8225
+    const Probe = defineComponent({
+      setup() {
+        const { statusLabel, statusBadgeClass } = useChannelMonitorFormat()
+        return () => h('div', [
+          h('span', { class: statusBadgeClass('degraded', oldWarningMs), 'data-testid': 'old-warning' }, statusLabel('degraded', oldWarningMs)),
+          h('span', { class: statusBadgeClass('degraded', 10000), 'data-testid': 'boundary' }, statusLabel('degraded', 10000)),
+          h('span', { class: statusBadgeClass('failed', oldWarningMs), 'data-testid': 'failed' }, statusLabel('failed', oldWarningMs)),
+          h('span', { class: statusBadgeClass('error', oldWarningMs), 'data-testid': 'error' }, statusLabel('error', oldWarningMs)),
+          h('span', { class: statusBadgeClass('degraded', null), 'data-testid': 'quota' }, statusLabel('degraded', null)),
+        ])
+      },
+    })
+    const pinia = createPinia()
+    const wrapper = mount(Probe, { global: { plugins: [pinia] } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="old-warning"]').classes()).toContain('bg-red-100')
+
+    vi.mocked(getPublicSettings).mockResolvedValue({
+      first_token_thresholds_ms: { warn: 10000, slow: 30000, critical: 60000 },
+    } as PublicSettings)
+    await useAppStore(pinia).fetchPublicSettings(true)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="old-warning"]').classes()).toContain('bg-emerald-100')
+    expect(wrapper.get('[data-testid="old-warning"]').text()).toBe('monitorCommon.status.operational')
+    expect(wrapper.get('[data-testid="boundary"]').classes()).toContain('bg-amber-100')
+    expect(wrapper.get('[data-testid="failed"]').classes()).toContain('bg-red-100')
+    expect(wrapper.get('[data-testid="failed"]').text()).toBe('monitorCommon.status.failed')
+    expect(wrapper.get('[data-testid="error"]').text()).toBe('monitorCommon.status.error')
+    expect(wrapper.get('[data-testid="quota"]').classes()).toContain('bg-amber-100')
+    expect(wrapper.get('[data-testid="quota"]').text()).toBe('monitorCommon.status.degraded')
+
+    vi.mocked(getPublicSettings).mockResolvedValue({
+      first_token_thresholds_ms: { warn: 1000, slow: 30000, critical: 60000 },
+    } as PublicSettings)
+    await useAppStore(pinia).fetchPublicSettings(true)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="old-warning"]').classes()).toContain('bg-amber-100')
+    expect(wrapper.get('[data-testid="old-warning"]').text()).toBe('monitorCommon.status.degraded')
+  })
+
+  it('shows old 8-second degraded history as green below the current 10-second threshold', async () => {
+    vi.mocked(getPublicSettings).mockResolvedValue({
+      first_token_thresholds_ms: { warn: 10000, slow: 30000, critical: 60000 },
+    } as PublicSettings)
+    const point = { status: 'degraded' as const, latency_ms: 8225, ping_latency_ms: null, checked_at: new Date().toISOString() }
+    const wrapper = mount(MonitorTimeline, {
+      props: { length: 1, countdownSeconds: 0, buckets: [point] },
+      global: { plugins: [createPinia()] },
+    })
+    await flushPromises()
+    const bar = wrapper.get('[title]')
+    expect(bar.classes()).toContain('bg-emerald-500')
+    expect(bar.attributes('style')).toContain('height: 100%')
+    expect(bar.attributes('title')).toContain('monitorCommon.status.operational')
+    expect(point.status).toBe('degraded')
+  })
+
   it('refreshes stale injected settings and preserves failures and quota warnings', async () => {
     window.__APP_CONFIG__ = { first_token_thresholds_ms: { warn: 10000, slow: 30000, critical: 60000 } } as PublicSettings
     const pinia = createPinia()
