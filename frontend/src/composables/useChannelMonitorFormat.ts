@@ -69,7 +69,13 @@ export function useChannelMonitorFormat() {
 
   function displayStatus(s: MonitorStatus | '', ms?: number | null): MonitorStatus | '' {
     const severity = latencySeverity(ms)
-    return s === STATUS_OPERATIONAL && severity && severity !== 'good' ? STATUS_DEGRADED : s
+    // Probe warnings retain their original status in history. Reclassify in both
+    // directions when thresholds change. Quota-only warnings have no latency;
+    // failed/error results must keep their original outcome.
+    if ((s === STATUS_OPERATIONAL || s === STATUS_DEGRADED) && severity) {
+      return severity === 'good' ? STATUS_OPERATIONAL : STATUS_DEGRADED
+    }
+    return s
   }
 
   function statusLabel(s: MonitorStatus | '', ms?: number | null): string {
@@ -79,6 +85,7 @@ export function useChannelMonitorFormat() {
   }
 
   function statusBadgeClass(s: MonitorStatus | '', ms?: number | null): string {
+    s = displayStatus(s, ms)
     const severity = latencySeverity(ms)
     if ((s === STATUS_OPERATIONAL || s === STATUS_DEGRADED) && severity && severity !== 'good') {
       if (severity === 'critical') return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
